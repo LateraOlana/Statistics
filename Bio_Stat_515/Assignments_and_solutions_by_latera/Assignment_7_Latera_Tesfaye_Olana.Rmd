@@ -1,0 +1,217 @@
+---
+title: "BIOST 515/518 Homework 7"
+author: "Latera Tesfaye Olana"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+
+  pdf_document: 
+    fig_caption: yes
+header-includes:
+ \usepackage{float}
+---
+
+```{r setup, include=FALSE, message=FALSE}
+### Setting up the packages
+library(knitr)
+knitr::opts_chunk$set(echo = FALSE)
+# check if packages are installed; if not, install them
+packages <- c("tidyverse", "readr", "ggExtra", "plotly",
+              "ggplot2","ggstatsplot","ggside","rigr","nlme","lmtest",
+              "sandwich","ggpubr")
+not_installed <- setdiff(packages, rownames(installed.packages()))
+if (length(not_installed)) install.packages(not_installed)
+
+# load packages
+library("MASS") 
+library(sandwich)
+library(readr)
+library(lmtest)
+library(nlme)
+library(ggstatsplot)
+library(ggside)
+library(gtsummary)
+library(survival)
+library(caret)
+library(survminer)
+library(rigr)
+library(ggExtra)
+library(broom)
+library(plotly)
+library(ggplot2)
+library(table1)
+library(tidyverse) # don't load tidyverse package due to conflict with dplyr
+```
+
+```{r, include=F, message=FALSE, warning=F}
+### -----------------------------------------------------------
+#Loading working directory of the raw data
+
+#Please load your data/directory by changing it with your work directory
+#Throughout this code module you will see a tone of places, where
+#data is read and written, so please make sure to change them to your
+#working directory folder format
+
+working_directory_data <- setwd("C:/Users/latera/Desktop/Bio_ass")
+
+survi <- read_csv("Data/thiotepa.csv")
+
+```
+
+# Responses:
+
+## Question 1: 
+
+```{r}
+tte <- survi %>% with(Surv(stop, event))
+```
+
+The event we are interested in is first tumor recurrence. 
+
+After applying *Surv()*, the following are the time to event data. Table 1 shows summary of the first 10 survival probabilities.
+```{r}
+sort(tte)
+```
+```{r}
+knitr::kable(tidy(survfit(tte ~ 1) )%>% slice(1:10), 
+      
+      digits = 5,caption = "Summary of the 10 first observation")
+```
+
+```{r echo=FALSE, fig.height=5, fig.width=6, message=FALSE, warning=FALSE, fig.cap="KM curve"}
+rx_factor <- factor(survi$rx, levels = c(1, 2), labels = c("Placebo", "Thiotepa"))
+survfit(tte ~ rx_factor, survi) %>%
+ ggsurvplot(data = survi, conf.int=T, xlab = "Time (months)",
+ ylab = "Estimated\nsurvival function",
+ palette = c("#2E9FDF", "purple"))
+```
+
+
+Figure 1 shows the survival curve for thiotepa and placebo arms. On the figure vertical drop represents occurrence of an event (tumor recurrence ) and (+) shows censoring. Censoring seems common at later months. The median the survival time for thiotepa arm is approximately around 25 weeks, where as for placebo arm it is approximately 15 weeks. During the first months we can see the survival functions for treatment and control group overlaps. This probably implies, non-proportionality in the hazard function.
+
+\pagebreak
+## Question 2:
+
+
+```{r}
+# Perform log-rank test
+logrank_test <- survdiff(tte ~ rx_factor)
+
+logrank_test
+```
+
+Based on the log-rank test, there is no significant difference in the distribution of first tumor recurrence between the thiotepa and placebo treatment arms ($\chi^2$ = 1.52, p=0.2). Therefore, we fail to reject the null hypothesis that there is no difference in first tumor recurrence between the two treatment arms (p-value = 0.2).
+
+
+## Question 3: 
+
+The model we want to fit can be written as follow:
+$\text log(h_i (t)/ h_0 (t))$ = $\beta_{1} \times X_{i1}$. Where, $h_i (t)$ is the hazard for a population member with $X_1$ = $X_{i1}$; Where, $h_0 (t)$ is the hazard for a population member with $X_1$ = 0, i.e, within a placebo study arm. Accordingly, $h_0 (t)$ represents a reference or baseline hazard for a placebo study arm. $X_{i1}$ is 1 for treatment arm group (those receiving thiotepa) and 0 for control arm (those receiving placebo). 
+
+The fitted model can be re-written as:  
+$\hat{h_i (t)}$ =  $h_0 (t)$ * $e^{\hat{\beta}_{1} \times X_{i1}}$. Substituting the fitted number, the formula becomes: $\hat{h_i (t)}$ =  $h_0 (t)$ * $e^{-0.3706} \times X_{i1}$. $\hat{h_i (t)} / h_0 (t)$ is the fitted hazard ratio.
+
+
+```{r message=FALSE}
+model <- coxph(tte ~ rx_factor, data=survi)
+
+model %>% 
+  tbl_regression(
+    label = list(
+      
+      rx_factor ~ "Treatement Arm"
+    ),
+    exponentiate = F,
+    intercept = TRUE,
+    estimate_fun = purrr::partial(style_number, digits = 5)
+    )
+```
+
+Based on a Cox proportional hazards model, we estimate that the hazard ratio of first tumor recurrence is 0.69 when comparing populations in both study arms (those who received thiotepa - treatment arm to those who received placebo - control arm), with the control arm having greater estimated hazard (95% CI for hazard ratio: 0.38145 - 1.24926).  
+
+
+## Question 4:
+
+```{r}
+ph0 <- coxph(tte ~ 1, data=survi)
+ph1 <- coxph(tte ~ rx_factor, data=survi)
+k <- anova(ph0, ph1, test="LRT")
+```
+
+```{r results='asis'}
+knitr::kable(tidy(k), caption = "Summary of hypothesis testing")
+
+```
+
+We fail to reject the null hypothesis that the hazard for first tumor recurrence is equal across populations of both study arms (those who received thiotepa - treatment arm versus those who received placebo - control arm)  (Likelihood-Ratio Test - LRT, p = 0.2152).
+
+## Question 5:  
+
+Yes, they are different.
+
+Even though, both are used to test survival differences in two or more groups, the hypothesis testing in question 4 and 2 are different (cited):
+
+The Cox proportional hazards model tests for the effect of a predictor on the hazard of an event occurring over time, while the log-rank test is a non-parametric test that compares the observed survival times between groups.
+
+The Cox proportional hazards model estimates the hazard ratio, which represents the change in hazard for a one-unit change in the predictor, and provides a confidence interval and p-value for the effect. The log-rank test produces a test statistic and p-value that indicate whether there is a significant difference in survival between groups.
+
+Over all, the p-value obtained from a Cox proportional hazards model represents the significance of the association between the predictor and the hazard ratio, taking into account the time-to-event data and the censoring information. where as, the p-value obtained from a log-rank test represents the significance of the difference in survival curves between the two groups.
+
+## Question 6 : 
+
+Individuals who present with largest tumors in the bladder or urinary tract are at a heightened risk for cancer recurrence when contrasted with those small tumors. This suggests that the size of initial tumors may serve as a predictor for the likelihood of subsequent recurrences. Based on these fact, there is a scientific rationale for having 7 different categories of bladder tumor sizes. 
+
+The fitted model can be written as:  
+
+
+$\hat{h_i (t)}$ =  $h_0 (t)$ * $e^{-0.43 \times X_{i1} + -1.63 \times X_{i2} + -0.058 \times X_{i3} + -0.54 \times X_{i4} + 0.18 \times X_{i5} + 0.45 \times X_{i6} + 0.16 \times X_{i7}}$. Where, $h_0 (t)$ is the baseline hazard for a study participant who had one previous bladder tumor and assigned to control arm to receive placebo.  $X_{i1}$ is 1 for treatment arm group (those receiving thiotepa) and 0 for control arm (those receiving placebo); $X_{i2}$ is 1 if the $i^{th}$ study participant has two centimeters of bladder tumors before enrollment, other wise zero; $X_{i3}$ is 1 if study the $i^{th}$ study participant has three centimeters of bladder tumors before enrollment, other wise zero; $X_{i4}$ is 1 if study the $i^{th}$ study participant has four centimeters of bladder tumors before enrollment, other wise zero; $X_{i5}$ is 1 if study the $i^{th}$ study participant has five centimeters of bladder tumors before enrollment, other wise zero; $X_{i6}$ is 1 if study the $i^{th}$ study participant has six centimeters of bladder tumors before enrollment, other wise zero; $X_{i7}$ is 1 if study the $i^{th}$ study participant has eight centimeters of bladder tumors before enrollment, other wise zero.
+
+```{r message=FALSE}
+survi$size <- factor(survi$size, levels = c(1, 2,3,4,5,6,7), 
+                    labels = c("One", "Two","Three","Four","Five",
+                               "Six","seven"))
+
+ph1 <- coxph(tte ~ rx_factor + size, data=survi)
+
+ph1 %>% 
+  tbl_regression(
+    label = list(
+      
+      rx_factor ~ "Treatement Arm",
+      size ~ "Initial tumors"
+    ),
+    exponentiate = F,
+    intercept = TRUE,
+    estimate_fun = purrr::partial(style_number, digits = 5)
+    )
+```
+
+From a proportional hazards model, we estimate that for two groups of study participants with the same size of initial bladder tumor but who differ in their enrollment to a control (placebo) or treatment arm (thiotepa), the hazard ratio for first tumor recurrence is 0.65, with the control arm having greater estimated hazard (95% CI for hazard ratio: 0.35190, 1.20503).  
+
+
+From a proportional hazards, we estimate that for two groups of study participants that are in the same study arm with one group that had two centimeters of initial bladder tumors while the other had one centimeter of initial bladder tumors, the hazard ratio for first tumor recurrence is 0.20, with study participants with two centimeters of initial bladder tumors having lesser estimated hazard (95% CI for hazard ratio: 0.04629, 0.82714).
+
+From a proportional hazards, we estimate that for two groups of study participants that are in the same study arm with one group that had three centimeters of initial bladder tumors while the other had one centimeter of initial bladder tumors, the hazard ratio for first tumor recurrence is 0.94, with study participants with three centimeters of initial bladder tumors having lesser estimated hazard (95% CI for hazard ratio: 0.13620, 2.44451).
+
+From a proportional hazards, we estimate that for two groups of study participants that are in the same study arm with one group that had four centimeters of initial bladder tumors while the other had one centimeter of initial bladder tumors, the hazard ratio for first tumor recurrence is 0.58, with study participants with four centimeters of initial bladder tumors having lesser estimated hazard (95% CI for hazard ratio: 0.52184, 6.03504).
+
+From a proportional hazards, we estimate that for two groups of study participants that are in the same study arm with one group that had five centimeters of initial bladder tumors while the other had one centimeter of initial bladder tumors, the hazard ratio for first tumor recurrence is 0.20, with study participants with five centimeters of initial bladder tumors having lesser estimated hazard (95% CI for hazard ratio: 0.15986, 9.05322).
+
+From a proportional hazards, we estimate that for two groups of study participants that are in the same study arm with one group that had six centimeters of initial bladder tumors while the other had one centimeter of initial bladder tumors, the hazard ratio for first tumor recurrence is 1.57, with study participants with six centimeters of initial bladder tumors having higher estimated hazard (95% CI for hazard ratio: 0.47070, 5.24821	).
+
+From a proportional hazards, we estimate that for two groups of study participants that are in the same study arm with one group that had seven centimeters of initial bladder tumors while the other had one centimeter of initial bladder tumors, the hazard ratio for first tumor recurrence is 1.18, with study participants with seven centimeters of initial bladder tumors having higher estimated hazard (95% CI for hazard ratio: 0.15711, 8.81871	).
+  
+
+## Question 7 : 
+
+It is possible that the size of the largest tumor (pre-treatment) could be a potential confounder for time to recurrence in this study. As we have discussed in class confounding variable is a variable that is related to both the treatment group and the outcome variable, and could potentially influence the observed relationship between the two. In this case, the size of the largest tumor could be related to both the treatment group and the time to first recurrence. Patients with larger tumors may have a higher risk of recurrence (1), and they may also be more likely to be assigned to the thiotepa treatment arm if the randomization is not properly stratified by tumor size. It would be important to examine whether the distribution of tumor sizes is similar between the treatment groups. One way to do this would be to include tumor size as a covariate in a our model, along with treatment group and any other relevant variables.
+
+\pagebreak
+
+# Reference
+1. Chang C, Chen J, Chang WY, Chiang AJ. Tumor Size Has a Time-Varying Effect on Recurrence in Cervical Cancer. J Low Genit Tract Dis. 2016 Oct;20(4):317-20. doi: 10.1097/LGT.0000000000000238. PMID: 27438585.
+
+\pagebreak
+## Code Appendix
+
+```{r, ref.label=knitr::all_labels(),echo=TRUE,eval=FALSE}
+```
